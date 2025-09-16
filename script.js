@@ -27,9 +27,9 @@ document.addEventListener("DOMContentLoaded", function () {
   // Retrieve and set the last used environment ID
   const savedEnvironmentId = localStorage.getItem("environmentId");
   if (savedEnvironmentId) {
-    const environmentIdInput = document.getElementById("environmentIdInput");
-    if (environmentIdInput) {
-      environmentIdInput.value = savedEnvironmentId;
+    const environmentDropdown = document.getElementById("environmentDropdown");
+    if (environmentDropdown) {
+      environmentDropdown.value = savedEnvironmentId;
     }
   }
 
@@ -37,9 +37,9 @@ document.addEventListener("DOMContentLoaded", function () {
   const loadFlowsButton = document.getElementById("loadFlowsButton");
   if (loadFlowsButton) {
     loadFlowsButton.addEventListener("click", function () {
-      const environmentIdInput = document.getElementById("environmentIdInput");
-      if (environmentIdInput) {
-        localStorage.setItem("environmentId", environmentIdInput.value);
+      const environmentDropdown = document.getElementById("environmentDropdown");
+      if (environmentDropdown) {
+        localStorage.setItem("environmentId", environmentDropdown.value);
       }
     });
   }
@@ -120,20 +120,100 @@ $(document).ready(function () {
       // Hide the sign-in button and display sections for authenticated users
       document.getElementById('signInButton').style.display = 'none';
       document.getElementById('environmentSection').style.display = 'block';
-      
-      statusMessage.innerHTML = '<p>Signed in successfully!</p>';
 
+      // Show loading message, hide dropdown
+      const loadingMsg = document.getElementById('environmentLoadingMessage');
+      const dropdown = document.getElementById('environmentDropdown');
+      if (loadingMsg) loadingMsg.style.display = 'block';
+      if (dropdown) dropdown.style.display = 'none';
+
+      // Fetch and populate environments using working function
+      const environments = await fetchUserEnvironments();
+      populateEnvironmentDropdown(environments);
+
+      // Hide loading message, show dropdown
+      if (loadingMsg) loadingMsg.style.display = 'none';
+      if (dropdown) dropdown.style.display = 'block';
+
+      statusMessage.innerHTML = '<p>Signed in successfully!</p>';
     } catch (error) {
       console.error('Error during sign-in:', error);
       alert('Error during sign-in: ' + error.message);
     }
-}
+  }
+
+  // Fetch environments using Flow API (user-specific)
+  async function fetchUserEnvironments() {
+    try {
+      const activeAccount = msalInstance.getActiveAccount();
+      if (!activeAccount) {
+        throw new Error('No active account! Please sign in again.');
+      }
+
+      const tokenRequest = {
+        scopes: ['https://service.flow.microsoft.com/.default'],
+      };
+
+      const response = await msalInstance.acquireTokenSilent({
+        ...tokenRequest,
+        account: activeAccount,
+      });
+
+      const accessToken = response.accessToken;
+
+      // Fetch all environments the user has access to using Flow API
+      const apiUrl = 'https://api.flow.microsoft.com/providers/Microsoft.ProcessSimple/environments/';
+
+      const apiResponse = await fetch(apiUrl, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (apiResponse.ok) {
+        const data = await apiResponse.json();
+        const userEnvironments = data.value || [];
+        return userEnvironments;
+      } else {
+        const errorData = await apiResponse.json();
+        const errorMessage = errorData.error ? errorData.error.message : 'Unknown error';
+        throw new Error(`Error fetching environments: ${errorMessage}`);
+      }
+    } catch (error) {
+      if (error instanceof msal.InteractionRequiredAuthError) {
+        // Fallback to interactive method if silent acquisition fails
+        const response = await msalInstance.acquireTokenPopup({
+          scopes: ['https://service.flow.microsoft.com/.default'],
+          account: msalInstance.getActiveAccount(),
+        });
+        // Retry fetching environments
+        return await fetchUserEnvironments();
+      } else {
+        throw error;
+      }
+    }
+  }
+
+  // Populate the dropdown with environments
+  function populateEnvironmentDropdown(environments) {
+    const dropdown = document.getElementById("environmentDropdown");
+    if (!dropdown) {
+      alert("Could not find the environment dropdown in the page. Please check your HTML.");
+      return;
+    }
+    dropdown.innerHTML = "";
+    environments.forEach(env => {
+      const option = document.createElement("option");
+      option.value = env.name; // environment ID
+      option.textContent = `${env.properties.displayName} (${env.name})`;
+      dropdown.appendChild(option);
+    });
+  }
 
   async function loadFlows() {
-    const environmentIdInput = document.getElementById(
-      'environmentIdInput'
-    );
-    environmentId = environmentIdInput.value.trim();
+    const environmentDropdown = document.getElementById('environmentDropdown');
+    environmentId = environmentDropdown.value.trim();
 
     const editorSelection = document.getElementById('editorSelection');
     editorVersion = editorSelection.value; // 'true' or 'false'
@@ -142,7 +222,7 @@ $(document).ready(function () {
     const gridContainer = $('#gridContainer');
 
     if (!environmentId) {
-      alert('Please enter an Environment ID.');
+      alert('Please select an Environment.');
       return;
     }
 
@@ -168,7 +248,7 @@ $(document).ready(function () {
         environmentId
       )}/flows?api-version=2016-11-01?$top=100`;
 
-      // Fetch flows for the provided environment
+      // Fetch flows for the selected environment
       const apiResponse = await fetch(apiUrl, {
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -414,32 +494,32 @@ $(document).ready(function () {
         const properties = flow.properties || {};
         const displayName = properties.displayName || 'N/A';
         const state = properties.state || 'Unknown';
-	    const definitionSummary = properties.definitionSummary || {};
-	    const triggers = definitionSummary.triggers || [];
-	    const actions = definitionSummary.actions || [];
-		
+      const definitionSummary = properties.definitionSummary || {};
+      const triggers = definitionSummary.triggers || [];
+      const actions = definitionSummary.actions || [];
+    
         // Extract from first trigger (if available)
-	    const trigger = triggers.length > 0 ? triggers[0] : {};
-	    const triggerType = trigger.type || '';
-	    const triggerKind = trigger.kind || '';
-	    const operationId = trigger.metadata?.operationMetadataId || '';
-	    const actionCount = actions.length;		
-		
+      const trigger = triggers.length > 0 ? triggers[0] : {};
+      const triggerType = trigger.type || '';
+      const triggerKind = trigger.kind || '';
+      const operationId = trigger.metadata?.operationMetadataId || '';
+      const actionCount = actions.length;		
+    
         const editLink = `https://make.powerautomate.com/environments/${encodeURIComponent(
           environmentId
         )}/flows/shared/${encodeURIComponent(name)}?v3=${editorVersion}`; // Construct URL with v3 parameter
   
-		return {
-		 displayName,
-		 name,
-		 state,
-		 editLink,
-		 triggerType,
-		 triggerKind,
-		 operationId,
-		 actionCount,
-		 ...properties,
-		};
+    return {
+     displayName,
+     name,
+     state,
+     editLink,
+     triggerType,
+     triggerKind,
+     operationId,
+     actionCount,
+     ...properties,
+    };
       });
   
       if (gridContainer.data('dxDataGrid')) {
